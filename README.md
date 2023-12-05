@@ -4,7 +4,8 @@ Parallel (OpenMP and MPI) version of the GSL VEGAS Monte Carlo integration routi
 This is a parallel implementation of the VEGAS Monte Carlo integration routine of the [GNU Scientific Library](https://www.gnu.org/software/gsl/) (GSL).
 The OpenMP or MPI implementation can be chosen at compilation time, by using `-fopenmp` or `-DMPI` as flags. This has been tested with _gcc_ so your mileage may vary.
 
-The interface is the same as the corresponding serial routine from GSL, and it is used in the same way. Please see the [GSL documentation](https://www.gnu.org/software/gsl/doc/html/montecarlo.html#vegas) for details.
+The interface is the same as the corresponding serial routine from GSL, and it is used in the same way. Please see the [GSL documentation](https://www.gnu.org/software/gsl/doc/html/montecarlo.html#vegas) for details.  
+You will have to link `libgsl` to your final executable.
 
 ## OpenMP version
 
