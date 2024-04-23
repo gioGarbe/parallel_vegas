@@ -287,20 +287,20 @@ gsl_monte_vegas_integrate_openmp
       const size_t calls_per_box = state->calls_per_box;
       const double jacbin = state->jac;
       gsl_rng *rng = r;
-      
+      size_t n;
       state->it_num = state->it_start + it;
 
       reset_grid_values (state);
       
 #ifdef MPI
-      for(size_t n = par_rank ; n < tot_boxes ; n += par_size)
+      for(n = par_rank ; n < tot_boxes ; n += par_size)
 #endif
 #ifdef _OPENMP
       double *old_dist = state->d;
       memset(buf, 0, par_size * BINS_MAX * dim * sizeof(double));
       
 #pragma omp parallel for default(shared) firstprivate(state) reduction(+:intgrl,tss)
-      for(size_t n = 0; n < tot_boxes; n++)        
+      for(n = 0; n < tot_boxes; n++)        
 #endif
         {
           double m = 0.0, q = 0.0;
@@ -365,10 +365,11 @@ gsl_monte_vegas_integrate_openmp
       memcpy(state->d, buf, BINS_MAX * dim * sizeof(double));
 #endif
 
-#ifdef _OPENMP
+#ifdef _OPENMP      
       state->d = old_dist;
-      for(size_t n=0; n<par_size; n++)
-        for(size_t k=0; k< BINS_MAX * dim; k++) state->d[k] += buf[n*BINS_MAX*dim + k];
+      size_t k;
+      for(n=0; n<par_size; n++)
+        for(k=0; k< BINS_MAX * dim; k++) state->d[k] += buf[n*BINS_MAX*dim + k];
 #endif
       /* Compute final results for this iteration   */
 
