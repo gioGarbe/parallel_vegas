@@ -77,7 +77,6 @@ int main(int argc, char *argv[])
 
   /* different seed for different MPI instances, if any */
   gsl_rng_set(r, gsl_rng_default_seed + rank);
-
   
   /* set up the integration limits */
   double *xl = (double *)malloc(dim * sizeof(double));
@@ -89,7 +88,7 @@ int main(int argc, char *argv[])
     }
 
   /* set up the function to integrate - same in all MPI instances if any */
-  printf("seed: %lu",gsl_rng_default_seed);
+  if(!rank) printf("seed: %lu\n",gsl_rng_default_seed);
   srand(gsl_rng_default_seed);
   double *a = (double *)malloc(dim * sizeof(double));
   for(i=0; i<dim; i++) a[i] = (double)rand()/(double)RAND_MAX;
@@ -104,9 +103,9 @@ int main(int argc, char *argv[])
 
   struct timeval tv;  
   gettimeofday(&tv, NULL);  
-  unsigned long long s_start =
-    (unsigned long long)(tv.tv_sec) +
-    (unsigned long long)(tv.tv_usec) / 1000000;
+  double s_start =
+    (double)(tv.tv_sec) +
+    (double)(tv.tv_usec) / 1000000.0;
   
   
   GSL_VEGAS_INTEGRATE (&F, xl, xu, dim, calls/5, r, s,
@@ -139,11 +138,14 @@ int main(int argc, char *argv[])
     }
 
   gettimeofday(&tv, NULL);  
-  unsigned long long s_end =
-    (unsigned long long)(tv.tv_sec) +
-    (unsigned long long)(tv.tv_usec) / 1000000;
-
-  printf("Wall-clock time per cycle: %.3f s\n",(s_end-s_start)/(cycles+0.2));
+  double s_end =
+    (double)(tv.tv_sec) +
+    (double)(tv.tv_usec) / 1000000.0;
+  
+  if(!rank)
+    {
+      printf("Wall-clock time per cycle: %.3f s\n",(s_end-s_start)/(cycles+0.2));
+    }
 #ifdef MPI  
   MPI_Finalize();
 #endif  

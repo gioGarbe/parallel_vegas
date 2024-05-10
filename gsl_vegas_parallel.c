@@ -313,7 +313,7 @@ gsl_monte_vegas_integrate_openmp
 
 #ifdef _OPENMP          
           int par_rank = omp_get_thread_num();
-	  rng = myr[par_rank];
+          rng = myr[par_rank];
           state->d = &buf[par_rank * BINS_MAX * dim];
 #endif
 
