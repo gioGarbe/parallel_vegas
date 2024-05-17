@@ -84,6 +84,7 @@
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_monte.h>
 #include <gsl/gsl_monte_vegas.h>
+#include <gsl/gsl_cblas.h>
 
 #ifdef MPI
 #include <mpi.h>
@@ -91,9 +92,13 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+#include "gsl_rng_aligned.h"
 #endif
 
-#define MAXDIM 128
+#include "gsl_vegas_parallel.h"
+
+#define MAXDIM  128
+#define PADDING 16
 
 /* lib-specific headers */
 #define BINS_MAX 50             /* even integer, will be divided by two */
@@ -184,16 +189,7 @@ gsl_monte_vegas_integrate_openmp
 
 #ifdef _OPENMP
   const int par_size = omp_get_max_threads();
-  /* we need independent random number generators for each thread */
-  gsl_rng **myr = (gsl_rng **)malloc(par_size * sizeof(gsl_rng *));
-  for(i=0; i < par_size; i++)
-    {
-      myr[i] = gsl_rng_clone(r);
-      size_t seed = gsl_rng_get(r);
-      gsl_rng_set(myr[i], seed);        
-    }
-  /* a buffer to collect the distributions computed during the main computational cycle */
-  double *buf = (double *)malloc(par_size * BINS_MAX * dim * sizeof(double));  
+  double *buf = (double *)malloc(par_size * (BINS_MAX * dim + PADDING) * sizeof(double));  
 #endif
   
   if (state->stage == 0)
@@ -287,73 +283,83 @@ gsl_monte_vegas_integrate_openmp
       const size_t calls_per_box = state->calls_per_box;
       const double jacbin = state->jac;
       gsl_rng *rng = r;
-      size_t n;
+      
       state->it_num = state->it_start + it;
 
       reset_grid_values (state);
       
 #ifdef MPI
-      for(n = par_rank ; n < tot_boxes ; n += par_size)
+      for(size_t n = par_rank ; n < tot_boxes ; n += par_size)
 #endif
 #ifdef _OPENMP
       double *old_dist = state->d;
-      memset(buf, 0, par_size * BINS_MAX * dim * sizeof(double));
-      
-#pragma omp parallel for default(shared) firstprivate(state) reduction(+:intgrl,tss)
-      for(n = 0; n < tot_boxes; n++)        
-#endif
+      memset(buf, 0, par_size * (BINS_MAX * dim + PADDING) * sizeof(double));
+
+#pragma omp parallel default(shared) firstprivate(state) private(rng)
+      {
+        int par_rank = omp_get_thread_num();
+        state->d = &buf[par_rank * (BINS_MAX * dim + PADDING)];
+
+        rng = gsl_rng_clone_aligned(r);
+#pragma omp critical
         {
-          double m = 0.0, q = 0.0;
-          double f_sq_sum = 0.0;
+          gsl_rng_set(rng, gsl_rng_get(r));
+        }
+        
+        /* #pragma omp parallel for default(shared) firstprivate(state) reduction(+:intgrl,tss) */
+#pragma omp for reduction(+:intgrl,tss)
+        for(size_t n = 0; n < tot_boxes; n++)        
+#endif /* _OPENMP */
+          {
+            double m = 0.0, q = 0.0;
+            double f_sq_sum = 0.0;
+            
+            size_t k;
+            double x[MAXDIM] ;
+            coord mybin[MAXDIM]; /* the bin under consideration */
+            coord mybox[MAXDIM];
 
-          size_t k;
-          double x[MAXDIM];
-          coord mybin[MAXDIM]; /* the bin under consideration */
-          coord mybox[MAXDIM];
-
-#ifdef _OPENMP          
-          int par_rank = omp_get_thread_num();
-          rng = myr[par_rank];
-          state->d = &buf[par_rank * BINS_MAX * dim];
-#endif
-
-          memset(mybox, 0, MAXDIM * sizeof(coord));
-          get_box_coord(state, n, mybox);
-
-          for (k = 0; k < calls_per_box; k++)
-            {
-              double fval;
-              double bin_vol;
-
-              random_point (x, mybin, &bin_vol, mybox, xl, xu, state, rng);
-
-              fval = jacbin * bin_vol * GSL_MONTE_FN_EVAL (f, x);
-
-              /* 
-		 recurrence for mean and variance (sum of squares) 
-	      */
+            memset(mybox, 0, MAXDIM * sizeof(coord));
+            get_box_coord(state, n, mybox);
+            
+            for (k = 0; k < calls_per_box; k++)
               {
-                double d = fval - m;
-                m += d / (k + 1.0);
-                q += d * d * (k / (k + 1.0));
-              }
-
-              if (state->mode != GSL_VEGAS_MODE_STRATIFIED)
+                double fval;
+                double bin_vol;
+                
+                random_point (x, mybin, &bin_vol, mybox, xl, xu, state, rng);
+                
+                fval = jacbin * bin_vol * GSL_MONTE_FN_EVAL (f, x);
+                
+                /* 
+                   recurrence for mean and variance (sum of squares) 
+                */
                 {
-                  double f_sq = fval * fval;
-                  accumulate_distribution (state, mybin, f_sq);
+                  double d = fval - m;
+                  m += d / (k + 1.0);
+                  q += d * d * (k / (k + 1.0));
                 }
-            }
-
-          intgrl   += m * calls_per_box;	  
-          f_sq_sum  = q * calls_per_box;
-          tss      += f_sq_sum;
-
-          if (state->mode == GSL_VEGAS_MODE_STRATIFIED)
-            {
-              accumulate_distribution (state, mybin, f_sq_sum);
-            }
-        } /* end of parallel (MPI|OPENMP) region */
+                
+                if (state->mode != GSL_VEGAS_MODE_STRATIFIED)
+                  {
+                    double f_sq = fval * fval;
+                    accumulate_distribution (state, mybin, f_sq);
+                  }
+              }
+            
+            intgrl   += m * calls_per_box;	  
+            f_sq_sum  = q * calls_per_box;
+            tss      += f_sq_sum;
+            
+            if (state->mode == GSL_VEGAS_MODE_STRATIFIED)
+              {
+                accumulate_distribution (state, mybin, f_sq_sum);
+              }
+          } /* end of for loop */
+#ifdef _OPENMP
+        gsl_rng_free(rng);
+      } /* end of OpenMP parallel block */
+#endif
 #ifdef MPI
       tmp = intgrl;
       MPI_Allreduce(&tmp, &intgrl, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);  
@@ -365,11 +371,11 @@ gsl_monte_vegas_integrate_openmp
       memcpy(state->d, buf, BINS_MAX * dim * sizeof(double));
 #endif
 
-#ifdef _OPENMP      
+#ifdef _OPENMP
       state->d = old_dist;
-      size_t k;
-      for(n=0; n<par_size; n++)
-        for(k=0; k< BINS_MAX * dim; k++) state->d[k] += buf[n*BINS_MAX*dim + k];
+      for(size_t n=0; n<par_size; n++)
+        for(size_t k=0; k< BINS_MAX * dim; k++) state->d[k] += buf[n*(BINS_MAX*dim+PADDING) + k];
+      //cblas_daxpy(BINS_MAX * dim, 1.0, &buf[n*(BINS_MAX*dim+PADDING)], 1, state->d, 1);
 #endif
       /* Compute final results for this iteration   */
 
@@ -474,11 +480,8 @@ gsl_monte_vegas_integrate_openmp
 #ifdef MPI
   free(buf);
 #endif
-
 #ifdef _OPENMP
   free(buf);
-  for(i=0; i<par_size; i++) gsl_rng_free(myr[i]);
-  free(myr);  
 #endif
   
   return GSL_SUCCESS;

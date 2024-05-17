@@ -21,15 +21,18 @@
 #endif
 #endif
 
-double exact_integral(size_t dim, double *a)
+double exact_integral(size_t dim, const double *A)
 {
   int i;
-  
+  double a;
   double arg = 0.0, sin_ratio = 1.0;
+
   for(i=0; i<dim; i++)
     {
-      arg += a[i];
-      sin_ratio *= sin(a[i])/a[i];
+      //a = (double)(i+1)/(double)dim;
+      a = A[i];
+      arg += a;
+      sin_ratio *= sin(a)/a;
     }
 
   double ret = 0.5 + 0.5 * cos(arg) * sin_ratio;
@@ -38,12 +41,16 @@ double exact_integral(size_t dim, double *a)
 
 double f(double *x, size_t dim, void *params)
 {
-  double *a = (double *)params;
+  const double *a = (double *)params;
+  //double a;
   int i;
   double arg;
+  
   for(arg=0.0, i=0; i<dim; i++)
-    arg += a[i] * x[i];
-
+    {
+      //a = (double)(i+1)/(double)dim;
+      arg += a[i] * x[i];
+    }
   return(gsl_pow_2( cos(arg) ));  
 }
 
@@ -51,11 +58,12 @@ int main(int argc, char *argv[])
 { 
   if(argc != 3)
     {
-      printf("usage: %s dimension vegas_calls\n");
+      printf("usage: %s dimension vegas_calls\n",argv[0]);
       exit(3);
     }
-  int rank = 0, p=1;  
+  int rank = 0;
 #ifdef MPI
+  int p;
   MPI_Init(&argc,&argv);
   MPI_Comm_size(MPI_COMM_WORLD,&p);
   MPI_Comm_rank(MPI_COMM_WORLD,&rank);
@@ -140,7 +148,7 @@ int main(int argc, char *argv[])
   gettimeofday(&tv, NULL);  
   double s_end =
     (double)(tv.tv_sec) +
-    (double)(tv.tv_usec) / 1000000.0;
+    (double)(tv.tv_usec) / 1.0e6;
   
   if(!rank)
     {
