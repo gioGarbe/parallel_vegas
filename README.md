@@ -13,6 +13,9 @@ The integration routine is called `gsl_monte_vegas_integrate_openmp`.
 
 Please notice that this version **needs a [reentrant](https://en.wikipedia.org/wiki/Reentrancy_(computing)) integrand**.
 
+The scaling of this version is not bad, and there is probably room to improve the performance.  
+Generally the MPI version scales better.
+
 ## MPI version
 
 The integration routine is called `gsl_monte_vegas_integrate_mpi`.
