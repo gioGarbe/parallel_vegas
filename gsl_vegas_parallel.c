@@ -190,6 +190,12 @@ gsl_monte_vegas_integrate_openmp
 #ifdef _OPENMP
   const int par_size = omp_get_max_threads();
   double *buf = (double *)malloc(par_size * (BINS_MAX * dim + PADDING) * sizeof(double));  
+  gsl_rng **rngs = (gsl_rng **)malloc(par_size * sizeof(gsl_rng *));
+  for(i = 0; i < par_size; i++)
+    {
+      rngs[i] = gsl_rng_clone_aligned(r);
+      gsl_rng_set(rngs[i], gsl_rng_get(r));      
+    }
 #endif
   
   if (state->stage == 0)
@@ -274,6 +280,11 @@ gsl_monte_vegas_integrate_openmp
   cum_sig = 0.0;
 
   const size_t tot_boxes = (size_t)gsl_pow_int((double)state->boxes,state->dim);
+
+#ifdef _OPENMP 
+
+
+#endif
   
   for (it = 0; it < state->iterations; it++)
     {
@@ -282,29 +293,24 @@ gsl_monte_vegas_integrate_openmp
       double wgt, var, sig;
       const size_t calls_per_box = state->calls_per_box;
       const double jacbin = state->jac;
-      gsl_rng *rng = r;
       
       state->it_num = state->it_start + it;
 
       reset_grid_values (state);
       
 #ifdef MPI
+      gsl_rng *rng = r;
       for(size_t n = par_rank ; n < tot_boxes ; n += par_size)
 #endif
 #ifdef _OPENMP
       double *old_dist = state->d;
       memset(buf, 0, par_size * (BINS_MAX * dim + PADDING) * sizeof(double));
 
-#pragma omp parallel default(shared) firstprivate(state) private(rng)
+#pragma omp parallel default(shared) firstprivate(state)
       {
         int par_rank = omp_get_thread_num();
         state->d = &buf[par_rank * (BINS_MAX * dim + PADDING)];
-
-        rng = gsl_rng_clone_aligned(r);
-#pragma omp critical
-        {
-          gsl_rng_set(rng, gsl_rng_get(r));
-        }
+        gsl_rng *rng = rngs[par_rank];
         
         /* #pragma omp parallel for default(shared) firstprivate(state) reduction(+:intgrl,tss) */
 #pragma omp for reduction(+:intgrl,tss)
@@ -357,7 +363,6 @@ gsl_monte_vegas_integrate_openmp
               }
           } /* end of for loop */
 #ifdef _OPENMP
-        gsl_rng_free(rng);
       } /* end of OpenMP parallel block */
 #endif
 #ifdef MPI
@@ -482,6 +487,8 @@ gsl_monte_vegas_integrate_openmp
 #endif
 #ifdef _OPENMP
   free(buf);
+  for(i=0; i<par_size; i++) gsl_rng_free(rngs[i]);
+  free(rngs);
 #endif
   
   return GSL_SUCCESS;
